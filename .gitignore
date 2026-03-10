@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js
+dashboard/.next/
+dashboard/out/
+
+# Python
+crawler/__pycache__/
+crawler/**/__pycache__/
+crawler/.venv/
+crawler/venv/
+crawler/*.egg-info/
+crawler/dist/
+crawler/build/
+*.pyc
+*.pyo
+
+# Environment
+.env
+.env.local
+.env.*.local
+crawler/.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+crawler/logs/
+*.log
+
+# Testing
+coverage/
+.pytest_cache/
+htmlcov/
+
+# Playwright
+crawler/screenshots/
+
+# Claude Code
+.claude/

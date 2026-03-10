@@ -1,0 +1,25 @@
+[project]
+name = "jobcrawler"
+version = "0.1.0"
+description = "Automated job search crawler with Claude AI scoring"
+requires-python = ">=3.11"
+dependencies = [
+    "scrapy>=2.11",
+    "playwright>=1.40",
+    "anthropic>=0.39",
+    "supabase>=2.0",
+    "python-dotenv>=1.0",
+    "scrapy-playwright>=0.0.40",
+    "fake-useragent>=1.4",
+    "w3lib>=2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"

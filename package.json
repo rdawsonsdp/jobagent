@@ -1,0 +1,10 @@
+{
+  "name": "job-search-agent",
+  "private": true,
+  "scripts": {
+    "dev": "cd dashboard && npm run dev",
+    "build": "cd dashboard && npm run build",
+    "crawl": "cd crawler && python crawl_orchestrator.py",
+    "crawl:test": "cd crawler && python crawl_orchestrator.py --budget 10"
+  }
+}
