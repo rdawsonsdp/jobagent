@@ -364,21 +364,36 @@ class CrawlOrchestrator:
             logger.error("Failed to create crawl_run record: %s", e)
 
     def _complete_crawl_run(self, status: str) -> None:
-        """Update the crawl_run record with final stats."""
+        """Update the crawl_run record with final stats from DB counts."""
         if not self.crawl_run_id:
             return
 
         try:
+            # Count jobs created during this run window
+            client = self.db.get_client()
+            started_at = datetime.utcfromtimestamp(self.start_time).isoformat()
+
+            new_jobs_resp = (
+                client.table("jobs")
+                .select("id", count="exact")
+                .gte("created_at", started_at)
+                .execute()
+            )
+            new_jobs_count = new_jobs_resp.count if new_jobs_resp.count else len(new_jobs_resp.data or [])
+
             update_data = build_crawl_summary_update(
                 self.crawl_run_id,
-                total_jobs_found=self.stats["total_jobs_found"],
-                new_jobs_added=self.stats["new_jobs_added"],
+                total_jobs_found=new_jobs_count,
+                new_jobs_added=new_jobs_count,
                 duplicates_skipped=self.stats["duplicates_skipped"],
                 errors=self.stats["errors"],
                 status=status,
             )
             self.db.update_crawl_run(self.crawl_run_id, update_data)
-            logger.info("Updated crawl run %s: %s", self.crawl_run_id, status)
+            logger.info(
+                "Updated crawl run %s: %s (found: %d, new: %d)",
+                self.crawl_run_id, status, new_jobs_count, new_jobs_count,
+            )
         except Exception as e:
             logger.error("Failed to update crawl_run: %s", e)
 

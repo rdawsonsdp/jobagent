@@ -331,3 +331,147 @@ class SupabaseDB:
             row["company"] = job.get("company", "")
             results.append(row)
         return results
+
+    # ------------------------------------------------------------------
+    # User Profile
+    # ------------------------------------------------------------------
+
+    def get_user_profile(self) -> dict[str, Any] | None:
+        """
+        Get the first user profile row.
+
+        Expected columns: first_name, last_name, email, phone, city, state,
+        linkedin_url, website, work_authorization, etc.
+
+        Returns:
+            User profile dict or None.
+        """
+        client = self.get_client()
+        response = (
+            client.table("user_profile")
+            .select("*")
+            .limit(1)
+            .execute()
+        )
+        if response.data:
+            return response.data[0]
+        return None
+
+    # ------------------------------------------------------------------
+    # Browser Sessions (for platform-specific login persistence)
+    # ------------------------------------------------------------------
+
+    def get_browser_session(self, platform: str) -> dict[str, Any] | None:
+        """
+        Get the stored browser session (Playwright storage_state) for a
+        given platform (e.g. 'indeed', 'linkedin').
+
+        Returns:
+            Dict with at least ``storage_state`` (JSON blob) or None.
+        """
+        client = self.get_client()
+        response = (
+            client.table("browser_sessions")
+            .select("*")
+            .eq("platform", platform)
+            .limit(1)
+            .execute()
+        )
+        if response.data:
+            return response.data[0]
+        return None
+
+    def save_browser_session(
+        self,
+        platform: str,
+        storage_state: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Upsert browser session for a platform.
+
+        Args:
+            platform: Platform identifier ('indeed', 'linkedin', etc.)
+            storage_state: The Playwright storage-state JSON blob.
+
+        Returns:
+            The upserted record.
+        """
+        client = self.get_client()
+        import json as _json
+
+        payload: dict[str, Any] = {
+            "platform": platform,
+            "storage_state": _json.dumps(storage_state)
+            if isinstance(storage_state, dict)
+            else storage_state,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        response = (
+            client.table("browser_sessions")
+            .upsert(payload, on_conflict="platform")
+            .execute()
+        )
+        if response.data:
+            return response.data[0]
+        return {}
+
+    # ------------------------------------------------------------------
+    # Application Attempts (cross-platform application tracking)
+    # ------------------------------------------------------------------
+
+    def insert_application_attempt(
+        self, data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """
+        Insert a record into the application_attempts table.
+
+        Expected keys in *data*:
+            job_id, platform, status, applied_at, notes, screenshot_path,
+            error_message, etc.
+
+        Returns:
+            The inserted record.
+        """
+        client = self.get_client()
+        response = (
+            client.table("application_attempts")
+            .insert(data)
+            .execute()
+        )
+        if response.data:
+            return response.data[0]
+        return {}
+
+    # ------------------------------------------------------------------
+    # Auto-Apply Logs (step-by-step activity logging)
+    # ------------------------------------------------------------------
+
+    def log_apply_step(
+        self,
+        queue_item_id: str | None,
+        job_id: str | None,
+        step_number: int | None,
+        action: str,
+        detail: str,
+        screenshot_path: str | None = None,
+        level: str = "info",
+    ) -> None:
+        """Insert a log entry for auto-apply activity."""
+        try:
+            client = self.get_client()
+            payload: dict[str, Any] = {
+                "action": action,
+                "detail": detail,
+                "level": level,
+            }
+            if queue_item_id:
+                payload["queue_item_id"] = queue_item_id
+            if job_id:
+                payload["job_id"] = job_id
+            if step_number is not None:
+                payload["step_number"] = step_number
+            if screenshot_path:
+                payload["screenshot_path"] = screenshot_path
+            client.table("auto_apply_logs").insert(payload).execute()
+        except Exception:
+            pass  # Never let logging break the apply flow

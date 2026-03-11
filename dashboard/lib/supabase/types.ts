@@ -375,6 +375,162 @@ export type Database = {
         };
         Relationships: [];
       };
+      user_profile: {
+        Row: {
+          id: string;
+          first_name: string | null;
+          last_name: string | null;
+          email: string | null;
+          phone: string | null;
+          linkedin_url: string | null;
+          website_url: string | null;
+          city: string | null;
+          state: string | null;
+          country: string | null;
+          work_authorization: string | null;
+          willing_to_relocate: boolean | null;
+          desired_salary: string | null;
+          years_experience: number | null;
+          education_level: string | null;
+          screening_defaults: Json | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          first_name?: string | null;
+          last_name?: string | null;
+          email?: string | null;
+          phone?: string | null;
+          linkedin_url?: string | null;
+          website_url?: string | null;
+          city?: string | null;
+          state?: string | null;
+          country?: string | null;
+          work_authorization?: string | null;
+          willing_to_relocate?: boolean | null;
+          desired_salary?: string | null;
+          years_experience?: number | null;
+          education_level?: string | null;
+          screening_defaults?: Json | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          first_name?: string | null;
+          last_name?: string | null;
+          email?: string | null;
+          phone?: string | null;
+          linkedin_url?: string | null;
+          website_url?: string | null;
+          city?: string | null;
+          state?: string | null;
+          country?: string | null;
+          work_authorization?: string | null;
+          willing_to_relocate?: boolean | null;
+          desired_salary?: string | null;
+          years_experience?: number | null;
+          education_level?: string | null;
+          screening_defaults?: Json | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
+      browser_sessions: {
+        Row: {
+          id: string;
+          platform: string;
+          cookies: Json | null;
+          storage_state: Json | null;
+          user_agent: string | null;
+          is_valid: boolean | null;
+          last_used_at: string | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          platform: string;
+          cookies?: Json | null;
+          storage_state?: Json | null;
+          user_agent?: string | null;
+          is_valid?: boolean | null;
+          last_used_at?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          platform?: string;
+          cookies?: Json | null;
+          storage_state?: Json | null;
+          user_agent?: string | null;
+          is_valid?: boolean | null;
+          last_used_at?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
+      application_attempts: {
+        Row: {
+          id: string;
+          auto_apply_queue_id: string | null;
+          job_id: string | null;
+          platform: string;
+          steps_completed: Json | null;
+          screening_answers: Json | null;
+          screenshot_paths: string[] | null;
+          error_log: string | null;
+          duration_seconds: number | null;
+          status: string;
+          created_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          auto_apply_queue_id?: string | null;
+          job_id?: string | null;
+          platform: string;
+          steps_completed?: Json | null;
+          screening_answers?: Json | null;
+          screenshot_paths?: string[] | null;
+          error_log?: string | null;
+          duration_seconds?: number | null;
+          status?: string;
+          created_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          auto_apply_queue_id?: string | null;
+          job_id?: string | null;
+          platform?: string;
+          steps_completed?: Json | null;
+          screening_answers?: Json | null;
+          screenshot_paths?: string[] | null;
+          error_log?: string | null;
+          duration_seconds?: number | null;
+          status?: string;
+          created_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "application_attempts_auto_apply_queue_id_fkey";
+            columns: ["auto_apply_queue_id"];
+            isOneToOne: false;
+            referencedRelation: "auto_apply_queue";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "application_attempts_job_id_fkey";
+            columns: ["job_id"];
+            isOneToOne: false;
+            referencedRelation: "jobs";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       search_profiles: {
         Row: {
           created_at: string | null;

@@ -22,8 +22,12 @@ export default function ResumePage() {
 
   const uploadFile = useCallback(
     async (file: File) => {
-      if (file.type !== "application/pdf") {
-        toast.error("Please upload a PDF file.");
+      const accepted = [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ];
+      if (!accepted.includes(file.type)) {
+        toast.error("Please upload a PDF or DOCX file.");
         return;
       }
 
@@ -117,7 +121,7 @@ export default function ResumePage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf"
+            accept=".pdf,.docx"
             onChange={handleFileChange}
             className="hidden"
           />
@@ -139,10 +143,10 @@ export default function ResumePage() {
               </div>
               <div>
                 <p className="text-sm font-medium text-gray-700">
-                  Drop your PDF resume here or click to browse
+                  Drop your resume here or click to browse
                 </p>
                 <p className="text-xs text-gray-400 mt-1">
-                  Accepts .pdf files only
+                  Accepts .pdf and .docx files
                 </p>
               </div>
             </div>

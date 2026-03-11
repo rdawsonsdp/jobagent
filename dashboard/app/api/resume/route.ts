@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractText } from "unpdf";
+import mammoth from "mammoth";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY!;
+
+const ACCEPTED_TYPES = [
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+];
 
 const PARSE_PROMPT = `You are a resume parser. Analyze the following resume text and extract structured information.
 
@@ -28,18 +34,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    if (file.type !== "application/pdf") {
+    if (!ACCEPTED_TYPES.includes(file.type)) {
       return NextResponse.json(
-        { error: "Only PDF files are accepted" },
+        { error: "Only PDF and DOCX files are accepted" },
         { status: 400 }
       );
     }
 
-    // Extract text from PDF
+    // Extract text from PDF or DOCX
     const arrayBuffer = await file.arrayBuffer();
-    const uint8 = new Uint8Array(arrayBuffer);
-    const { text: pages } = await extractText(uint8);
-    const resumeText = pages.join("\n\n");
+    let resumeText: string;
+
+    if (file.type === "application/pdf") {
+      const uint8 = new Uint8Array(arrayBuffer);
+      const { text: pages } = await extractText(uint8);
+      resumeText = pages.join("\n\n");
+    } else {
+      const result = await mammoth.extractRawText({ buffer: Buffer.from(arrayBuffer) });
+      resumeText = result.value;
+    }
 
     if (!resumeText || resumeText.trim().length === 0) {
       return NextResponse.json(

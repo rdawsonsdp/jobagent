@@ -68,6 +68,65 @@ class ClaudeClient:
 
         return "\n".join(text_parts)
 
+    def call_api_with_image(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        image_base64: str,
+        max_tokens: int = 2048,
+        temperature: float = 0.3,
+        media_type: str = "image/png",
+    ) -> str:
+        """
+        Make an API call with both text and an image (vision).
+
+        Args:
+            system_prompt: System-level instructions for the model.
+            user_prompt: User text prompt sent alongside the image.
+            image_base64: Base64-encoded image data.
+            max_tokens: Maximum response tokens.
+            temperature: Sampling temperature.
+            media_type: MIME type of the image (default ``image/png``).
+
+        Returns:
+            The model's text response.
+        """
+        if not self.client:
+            raise RuntimeError("Anthropic client not initialized (missing API key)")
+
+        response = self.client.messages.create(
+            model=MODEL,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system=system_prompt,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": image_base64,
+                            },
+                        },
+                        {
+                            "type": "text",
+                            "text": user_prompt,
+                        },
+                    ],
+                }
+            ],
+        )
+
+        text_parts = []
+        for block in response.content:
+            if hasattr(block, "text"):
+                text_parts.append(block.text)
+
+        return "\n".join(text_parts)
+
     def score_jobs(
         self,
         jobs: list[dict[str, Any]],
@@ -130,6 +189,11 @@ class ClaudeClient:
             f"{jobs_section}\n\n"
             f"Score each job 0-10 based on relevance to the candidate's profile.\n"
             f"Consider: title match, skills overlap, experience level, location/remote preferences.\n\n"
+            f"IMPORTANT LOCATION RULE: The candidate is based in the Chicago, IL / Chicagoland area.\n"
+            f"- Remote jobs are fine (no penalty).\n"
+            f"- Hybrid or onsite jobs IN the Chicagoland area are fine.\n"
+            f"- Onsite or hybrid jobs OUTSIDE Chicagoland should receive a score of 0-2 maximum,\n"
+            f"  regardless of how good the skills match is. Note this in the reasoning.\n\n"
             f"Return a JSON array with exactly {len(jobs)} objects, each with:\n"
             f"- \"score\": number 0-10 (decimal allowed)\n"
             f"- \"reasoning\": brief explanation (1-2 sentences)\n"
@@ -270,6 +334,94 @@ class ClaudeClient:
         except Exception as e:
             logger.error("Error generating cover letter via Claude: %s", e)
             return ""
+
+    def answer_screening_questions(
+        self,
+        questions: list[dict[str, Any]],
+        resume_data: dict[str, Any],
+        user_profile: dict[str, Any],
+        job_context: str = "",
+    ) -> list[dict[str, Any]]:
+        """
+        Generate answers for application screening questions.
+
+        Each question dict should have:
+            - ``question``: the question text
+            - ``field_type``: 'text', 'textarea', 'select', 'radio', etc.
+            - ``options``: list of allowed values (for select/radio)
+
+        Args:
+            questions: List of screening question dicts.
+            resume_data: Parsed resume data for context.
+            user_profile: User profile dict (name, email, etc.)
+            job_context: Optional extra info about the job.
+
+        Returns:
+            List of dicts with ``question`` and ``answer`` keys.
+        """
+        if not questions:
+            return []
+
+        system_prompt = (
+            "You are an expert job applicant assistant. Answer screening "
+            "questions on behalf of a candidate using their resume and profile. "
+            "Be concise, truthful, and professional. If a question has fixed "
+            "options, choose the best matching option exactly as written. "
+            "Return ONLY valid JSON."
+        )
+
+        resume_section = (
+            f"CANDIDATE RESUME:\n"
+            f"- Summary: {resume_data.get('summary', '')}\n"
+            f"- Skills: {', '.join(resume_data.get('skills', []))}\n"
+            f"- Years of experience: {resume_data.get('years_of_experience', 0)}\n"
+            f"- Education: {json.dumps(resume_data.get('education', []))}\n"
+            f"- Work history: {json.dumps(resume_data.get('work_history', []))}\n"
+        )
+
+        profile_section = (
+            f"CANDIDATE PROFILE:\n"
+            f"- Name: {user_profile.get('first_name', '')} {user_profile.get('last_name', '')}\n"
+            f"- Email: {user_profile.get('email', '')}\n"
+            f"- Phone: {user_profile.get('phone', '')}\n"
+            f"- Location: {user_profile.get('city', '')}, {user_profile.get('state', '')}\n"
+            f"- Work authorization: {user_profile.get('work_authorization', '')}\n"
+        )
+
+        questions_section = "SCREENING QUESTIONS:\n"
+        for i, q in enumerate(questions):
+            questions_section += (
+                f"\n{i + 1}. {q.get('question', '')}\n"
+                f"   Type: {q.get('field_type', 'text')}\n"
+            )
+            options = q.get("options", [])
+            if options:
+                questions_section += f"   Options: {options}\n"
+
+        user_prompt = (
+            f"{resume_section}\n"
+            f"{profile_section}\n"
+            f"{job_context}\n\n"
+            f"{questions_section}\n\n"
+            f"Return a JSON array of objects, one per question, each with:\n"
+            f"- \"question\": the original question text\n"
+            f"- \"answer\": your recommended answer\n\n"
+            f"If the question has fixed options, the answer MUST be one of the options exactly.\n"
+            f"Return ONLY the JSON array."
+        )
+
+        try:
+            response_text = self._call_api(system_prompt, user_prompt)
+            answers = self._parse_json_array(
+                response_text, expected_length=len(questions)
+            )
+            return answers
+        except Exception as e:
+            logger.error("Error answering screening questions via Claude: %s", e)
+            return [
+                {"question": q.get("question", ""), "answer": ""}
+                for q in questions
+            ]
 
     @staticmethod
     def _parse_json_array(

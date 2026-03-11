@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import {
@@ -12,6 +12,8 @@ import {
   XCircle,
   Clock,
   AlertTriangle,
+  Play,
+  Square,
 } from "lucide-react";
 
 interface CrawlRun {
@@ -26,10 +28,44 @@ interface CrawlRun {
   source_stats: Record<string, unknown> | null;
 }
 
+interface RecentJob {
+  id: string;
+  title: string;
+  company: string | null;
+  location: string | null;
+  relevance_score: number | null;
+  is_remote: boolean | null;
+  created_at: string | null;
+}
+
 export default function CrawlLogPage() {
   const [runs, setRuns] = useState<CrawlRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [crawlerRunning, setCrawlerRunning] = useState(false);
+  const [crawlerLoading, setCrawlerLoading] = useState(false);
+  const [recentJobs, setRecentJobs] = useState<RecentJob[]>([]);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const checkCrawlerStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/crawler");
+      const data = await res.json();
+      setCrawlerRunning(data.running);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const fetchRecentJobs = useCallback(async () => {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("jobs")
+      .select("id, title, company, location, relevance_score, is_remote, created_at")
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (data) setRecentJobs(data as RecentJob[]);
+  }, []);
 
   const fetchRuns = useCallback(async () => {
     const supabase = createClient();
@@ -50,7 +86,62 @@ export default function CrawlLogPage() {
 
   useEffect(() => {
     fetchRuns();
-  }, [fetchRuns]);
+    fetchRecentJobs();
+    checkCrawlerStatus();
+
+    // Poll every 5 seconds when crawler is running
+    pollRef.current = setInterval(() => {
+      checkCrawlerStatus();
+      fetchRecentJobs();
+      fetchRuns();
+    }, 5000);
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [fetchRuns, fetchRecentJobs, checkCrawlerStatus]);
+
+  const startCrawler = async () => {
+    setCrawlerLoading(true);
+    try {
+      const res = await fetch("/api/crawler", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "start", budget: 30 }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success("Crawler started");
+        setCrawlerRunning(true);
+      } else {
+        toast.error(data.error || "Failed to start crawler");
+      }
+    } catch {
+      toast.error("Failed to start crawler");
+    }
+    setCrawlerLoading(false);
+  };
+
+  const stopCrawler = async () => {
+    setCrawlerLoading(true);
+    try {
+      const res = await fetch("/api/crawler", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "stop" }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success("Crawler stopped");
+        setCrawlerRunning(false);
+      } else {
+        toast.error(data.error || "Failed to stop crawler");
+      }
+    } catch {
+      toast.error("Failed to stop crawler");
+    }
+    setCrawlerLoading(false);
+  };
 
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {
@@ -144,15 +235,87 @@ export default function CrawlLogPage() {
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
-        <div className="flex items-center gap-3 mb-6">
-          <Activity className="w-6 h-6 text-blue-600" />
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Crawl Log</h1>
-            <p className="text-sm text-gray-500">
-              History of job crawl runs and their results
-            </p>
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <Activity className="w-6 h-6 text-blue-600" />
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Crawl Log</h1>
+              <p className="text-sm text-gray-500">
+                History of job crawl runs and their results
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {crawlerRunning && (
+              <span className="inline-flex items-center gap-1.5 text-sm text-blue-600 font-medium">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Crawling...
+              </span>
+            )}
+            {crawlerRunning ? (
+              <button
+                onClick={stopCrawler}
+                disabled={crawlerLoading}
+                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+              >
+                {crawlerLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Square className="w-4 h-4" />
+                )}
+                Stop Crawler
+              </button>
+            ) : (
+              <button
+                onClick={startCrawler}
+                disabled={crawlerLoading}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {crawlerLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Play className="w-4 h-4" />
+                )}
+                Start Crawler
+              </button>
+            )}
           </div>
         </div>
+
+        {/* Live Job Feed */}
+        {recentJobs.length > 0 && (
+          <div className="mb-8 rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+            <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+              <h2 className="text-sm font-semibold text-gray-700">Recent Jobs (live)</h2>
+            </div>
+            <div className="max-h-64 overflow-y-auto divide-y divide-gray-100">
+              {recentJobs.map((job) => (
+                <div key={job.id} className="px-4 py-2.5 flex items-center justify-between text-sm">
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium text-gray-900 truncate block">{job.title}</span>
+                    <span className="text-gray-500 text-xs">
+                      {job.company ?? "Unknown"} &middot; {job.location ?? "N/A"}
+                      {job.is_remote && " (Remote)"}
+                    </span>
+                  </div>
+                  <div className="ml-4 shrink-0">
+                    <span
+                      className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                        (job.relevance_score ?? 0) >= 7
+                          ? "bg-green-100 text-green-800"
+                          : (job.relevance_score ?? 0) >= 4
+                          ? "bg-yellow-100 text-yellow-800"
+                          : "bg-gray-100 text-gray-600"
+                      }`}
+                    >
+                      {job.relevance_score?.toFixed(1) ?? "-"}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {runs.length === 0 ? (
           <div className="rounded-xl border border-gray-200 bg-white p-12 text-center">
