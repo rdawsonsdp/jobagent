@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { extractText } from "unpdf";
 import mammoth from "mammoth";
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { getAuthUserId } from "@/lib/auth";
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY!;
 
@@ -27,6 +28,9 @@ Resume text:
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await getAuthUserId();
+    if ("error" in auth) return auth.error;
+
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
 
@@ -115,15 +119,17 @@ export async function POST(request: NextRequest) {
     // Store in Supabase
     const supabase = await createServiceRoleClient();
 
-    // Deactivate old resumes, then insert new one
+    // Deactivate old resumes for this user, then insert new one
     await supabase
       .from("resumes")
       .update({ is_active: false })
-      .eq("is_active", true);
+      .eq("is_active", true)
+      .eq("user_id", auth.userId);
 
     const { data: resume, error: dbError } = await supabase
       .from("resumes")
       .insert({
+        user_id: auth.userId,
         file_name: file.name,
         raw_text: resumeText,
         parsed_data: parsedData,

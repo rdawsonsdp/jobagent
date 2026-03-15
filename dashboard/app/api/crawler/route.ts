@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exec, execSync, spawn } from "child_process";
 import path from "path";
+import { getAuthUserId } from "@/lib/auth";
 
 const CRAWLER_DIR = path.resolve(process.cwd(), "..", "crawler");
 const PYTHON = path.join(CRAWLER_DIR, ".venv", "bin", "python");
@@ -32,6 +33,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await getAuthUserId();
+  if ("error" in auth) return auth.error;
+
   const body = await request.json();
   const action = body.action as string;
 
@@ -44,12 +48,16 @@ export async function POST(request: NextRequest) {
     }
 
     const budget = body.budget ?? 30;
-    const proc = spawn(PYTHON, [ORCHESTRATOR, "--budget", String(budget)], {
-      cwd: CRAWLER_DIR,
-      detached: true,
-      stdio: "ignore",
-      env: { ...process.env, PATH: process.env.PATH },
-    });
+    const proc = spawn(
+      PYTHON,
+      [ORCHESTRATOR, "--budget", String(budget), "--user-id", auth.userId],
+      {
+        cwd: CRAWLER_DIR,
+        detached: true,
+        stdio: "ignore",
+        env: { ...process.env, PATH: process.env.PATH },
+      }
+    );
     proc.unref();
     crawlerProcess = proc;
     crawlerPid = proc.pid ?? null;

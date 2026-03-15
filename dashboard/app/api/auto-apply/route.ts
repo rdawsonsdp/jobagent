@@ -3,33 +3,23 @@ import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import path from "path";
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { getAuthUserId } from "@/lib/auth";
 
 const execAsync = promisify(exec);
 
-// Path to the Python CLI script in the crawler directory
-const CRAWLER_DIR = path.resolve(
-  process.cwd(),
-  "..",
-  "crawler"
-);
+const CRAWLER_DIR = path.resolve(process.cwd(), "..", "crawler");
 const APPLY_SCRIPT = path.join(CRAWLER_DIR, "apply_now.py");
 
-// Track running processes so GET can report status
 const runningProcesses = new Map<
   string,
   { pid: number; startedAt: string; action: string; detail: string }
 >();
 
-/**
- * POST /api/auto-apply
- *
- * Body variants:
- *   { action: "apply", itemId: string }          - Apply to a specific queue item
- *   { action: "login", platform: "linkedin" | "indeed" }  - Open browser for login
- *   { action: "check-session", platform: "linkedin" | "indeed" } - Check session status
- */
 export async function POST(request: NextRequest) {
   try {
+    const auth = await getAuthUserId();
+    if ("error" in auth) return auth.error;
+
     const body = await request.json();
     const { action } = body;
 
@@ -42,13 +32,13 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case "apply":
-        return handleApply(body);
+        return handleApply(body, auth.userId);
       case "queue-jobs":
-        return handleQueueJobs(body);
+        return handleQueueJobs(body, auth.userId);
       case "process-queue":
-        return handleProcessQueue(body);
+        return handleProcessQueue(body, auth.userId);
       case "login":
-        return handleLogin(body);
+        return handleLogin(body, auth.userId);
       case "check-session":
         return handleCheckSession(body);
       default:
@@ -64,24 +54,13 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/**
- * GET /api/auto-apply
- *
- * Returns the status of any running apply/login processes,
- * plus session validity info.
- */
 export async function GET() {
   try {
     const processes = Array.from(runningProcesses.entries()).map(
-      ([id, info]) => ({
-        id,
-        ...info,
-      })
+      ([id, info]) => ({ id, ...info })
     );
 
-    // Check session status for both platforms
     const sessions: Record<string, unknown> = {};
-
     for (const platform of ["linkedin", "indeed"]) {
       try {
         const { stdout } = await execAsync(
@@ -94,10 +73,7 @@ export async function GET() {
       }
     }
 
-    return NextResponse.json({
-      running: processes,
-      sessions,
-    });
+    return NextResponse.json({ running: processes, sessions });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("Auto-apply status error:", message);
@@ -105,14 +81,10 @@ export async function GET() {
   }
 }
 
-// ------------------------------------------------------------------
-// Action handlers
-// ------------------------------------------------------------------
-
-async function handleApply(body: {
-  itemId?: string;
-  dryRun?: boolean;
-}): Promise<NextResponse> {
+async function handleApply(
+  body: { itemId?: string; dryRun?: boolean },
+  userId: string
+): Promise<NextResponse> {
   const { itemId, dryRun } = body;
 
   if (!itemId) {
@@ -122,11 +94,8 @@ async function handleApply(body: {
     );
   }
 
-  // First update the queue item status to "approved" in Supabase
-  // so the crawler knows it should be processed
   const supabase = await createServiceRoleClient();
 
-  // Verify the item exists
   const { data: item, error: fetchError } = await supabase
     .from("auto_apply_queue")
     .select("id, status, job_id, jobs(title, company)")
@@ -140,18 +109,13 @@ async function handleApply(body: {
     );
   }
 
-  // Update status to "approved" if still pending
   if (item.status === "pending_review") {
     const { error: updateError } = await supabase
       .from("auto_apply_queue")
-      .update({
-        status: "approved",
-        submitted_at: new Date().toISOString(),
-      })
+      .update({ status: "approved", submitted_at: new Date().toISOString() })
       .eq("id", itemId);
 
     if (updateError) {
-      console.error("Failed to update queue item status:", updateError);
       return NextResponse.json(
         { error: "Failed to update queue item status" },
         { status: 500 }
@@ -159,11 +123,8 @@ async function handleApply(body: {
     }
   }
 
-  // Spawn the Python apply script in the background
-  const args = ["apply_now.py", "--item-id", itemId];
-  if (dryRun) {
-    args.push("--dry-run");
-  }
+  const args = ["apply_now.py", "--item-id", itemId, "--user-id", userId];
+  if (dryRun) args.push("--dry-run");
 
   const processId = `apply_${itemId}`;
 
@@ -174,7 +135,6 @@ async function handleApply(body: {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    // Type assertion for job info
     const jobInfo = item.jobs as { title?: string; company?: string } | null;
 
     runningProcesses.set(processId, {
@@ -186,23 +146,13 @@ async function handleApply(body: {
 
     let stdout = "";
     let stderr = "";
-
-    child.stdout?.on("data", (data: Buffer) => {
-      stdout += data.toString();
-    });
-
-    child.stderr?.on("data", (data: Buffer) => {
-      stderr += data.toString();
-    });
+    child.stdout?.on("data", (data: Buffer) => { stdout += data.toString(); });
+    child.stderr?.on("data", (data: Buffer) => { stderr += data.toString(); });
 
     child.on("close", async (code) => {
       runningProcesses.delete(processId);
-
       if (code !== 0) {
-        console.error(
-          `Apply script exited with code ${code}. stderr: ${stderr}`
-        );
-        // Update queue item with error info
+        console.error(`Apply script exited with code ${code}. stderr: ${stderr}`);
         const supa = await createServiceRoleClient();
         await supa
           .from("auto_apply_queue")
@@ -211,8 +161,6 @@ async function handleApply(body: {
             error_message: stderr.slice(0, 500) || `Process exited with code ${code}`,
           })
           .eq("id", itemId);
-      } else {
-        console.log(`Apply script completed for item ${itemId}: ${stdout}`);
       }
     });
 
@@ -228,7 +176,6 @@ async function handleApply(body: {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("Failed to spawn apply process:", message);
     return NextResponse.json(
       { error: `Failed to start apply process: ${message}` },
       { status: 500 }
@@ -236,9 +183,10 @@ async function handleApply(body: {
   }
 }
 
-async function handleLogin(body: {
-  platform?: string;
-}): Promise<NextResponse> {
+async function handleLogin(
+  body: { platform?: string },
+  userId: string
+): Promise<NextResponse> {
   const { platform } = body;
 
   if (!platform || !["linkedin", "indeed"].includes(platform)) {
@@ -249,8 +197,6 @@ async function handleLogin(body: {
   }
 
   const processId = `login_${platform}`;
-
-  // Check if a login process is already running for this platform
   if (runningProcesses.has(processId)) {
     return NextResponse.json(
       { error: `Login process already running for ${platform}` },
@@ -261,12 +207,8 @@ async function handleLogin(body: {
   try {
     const child = spawn(
       "python3",
-      ["apply_now.py", "--login", platform],
-      {
-        cwd: CRAWLER_DIR,
-        detached: true,
-        stdio: ["ignore", "pipe", "pipe"],
-      }
+      ["apply_now.py", "--login", platform, "--user-id", userId],
+      { cwd: CRAWLER_DIR, detached: true, stdio: ["ignore", "pipe", "pipe"] }
     );
 
     runningProcesses.set(processId, {
@@ -276,27 +218,12 @@ async function handleLogin(body: {
       detail: platform,
     });
 
-    let stdout = "";
     let stderr = "";
-
-    child.stdout?.on("data", (data: Buffer) => {
-      stdout += data.toString();
-    });
-
-    child.stderr?.on("data", (data: Buffer) => {
-      stderr += data.toString();
-    });
-
+    child.stderr?.on("data", (data: Buffer) => { stderr += data.toString(); });
     child.on("close", (code) => {
       runningProcesses.delete(processId);
       if (code !== 0) {
-        console.error(
-          `Login script for ${platform} exited with code ${code}. stderr: ${stderr}`
-        );
-      } else {
-        console.log(
-          `Login script for ${platform} completed: ${stdout}`
-        );
+        console.error(`Login script for ${platform} exited with code ${code}. stderr: ${stderr}`);
       }
     });
 
@@ -310,7 +237,6 @@ async function handleLogin(body: {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("Failed to spawn login process:", message);
     return NextResponse.json(
       { error: `Failed to start login process: ${message}` },
       { status: 500 }
@@ -318,9 +244,10 @@ async function handleLogin(body: {
   }
 }
 
-async function handleQueueJobs(body: {
-  jobIds?: string[];
-}): Promise<NextResponse> {
+async function handleQueueJobs(
+  body: { jobIds?: string[] },
+  userId: string
+): Promise<NextResponse> {
   const { jobIds } = body;
 
   if (!jobIds || jobIds.length === 0) {
@@ -332,7 +259,6 @@ async function handleQueueJobs(body: {
 
   const supabase = await createServiceRoleClient();
 
-  // Build queue rows — skip jobs already in queue
   const { data: existing } = await supabase
     .from("auto_apply_queue")
     .select("job_id")
@@ -353,16 +279,14 @@ async function handleQueueJobs(body: {
   const rows = newIds.map((jobId) => ({
     job_id: jobId,
     status: "approved",
+    user_id: userId,
   }));
 
   const { error } = await supabase.from("auto_apply_queue").insert(rows);
 
   if (error) {
     console.error("Failed to queue jobs:", error);
-    return NextResponse.json(
-      { error: "Failed to queue jobs" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to queue jobs" }, { status: 500 });
   }
 
   return NextResponse.json({
@@ -372,11 +296,11 @@ async function handleQueueJobs(body: {
   });
 }
 
-async function handleProcessQueue(body: {
-  dryRun?: boolean;
-}): Promise<NextResponse> {
+async function handleProcessQueue(
+  body: { dryRun?: boolean },
+  userId: string
+): Promise<NextResponse> {
   const { dryRun } = body;
-
   const processId = "process_queue";
 
   if (runningProcesses.has(processId)) {
@@ -386,10 +310,8 @@ async function handleProcessQueue(body: {
     );
   }
 
-  const args = ["apply_now.py", "--process-queue"];
-  if (dryRun) {
-    args.push("--dry-run");
-  }
+  const args = ["apply_now.py", "--process-queue", "--user-id", userId];
+  if (dryRun) args.push("--dry-run");
 
   try {
     const child = spawn("python3", args, {
@@ -405,25 +327,12 @@ async function handleProcessQueue(body: {
       detail: dryRun ? "dry run" : "live",
     });
 
-    let stdout = "";
     let stderr = "";
-
-    child.stdout?.on("data", (data: Buffer) => {
-      stdout += data.toString();
-    });
-
-    child.stderr?.on("data", (data: Buffer) => {
-      stderr += data.toString();
-    });
-
+    child.stderr?.on("data", (data: Buffer) => { stderr += data.toString(); });
     child.on("close", (code) => {
       runningProcesses.delete(processId);
       if (code !== 0) {
-        console.error(
-          `Queue processing exited with code ${code}. stderr: ${stderr}`
-        );
-      } else {
-        console.log(`Queue processing completed: ${stdout}`);
+        console.error(`Queue processing exited with code ${code}. stderr: ${stderr}`);
       }
     });
 
@@ -443,9 +352,7 @@ async function handleProcessQueue(body: {
   }
 }
 
-async function handleCheckSession(body: {
-  platform?: string;
-}): Promise<NextResponse> {
+async function handleCheckSession(body: { platform?: string }): Promise<NextResponse> {
   const { platform } = body;
 
   if (!platform || !["linkedin", "indeed"].includes(platform)) {
@@ -460,12 +367,9 @@ async function handleCheckSession(body: {
       `python3 "${APPLY_SCRIPT}" --check-session ${platform}`,
       { cwd: CRAWLER_DIR, timeout: 10000 }
     );
-
-    const result = JSON.parse(stdout.trim());
-    return NextResponse.json(result);
+    return NextResponse.json(JSON.parse(stdout.trim()));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("Session check error:", message);
     return NextResponse.json(
       { valid: false, last_updated: null, platform, error: message },
       { status: 200 }

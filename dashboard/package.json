@@ -9,14 +9,17 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.99.0",
+    "chromium": "^3.0.3",
     "lucide-react": "^0.577.0",
     "mammoth": "^1.11.0",
     "next": "16.1.6",
+    "puppeteer-core": "^24.39.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "recharts": "^3.8.0",

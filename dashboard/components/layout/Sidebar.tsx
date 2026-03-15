@@ -6,18 +6,17 @@ import {
   Briefcase,
   LayoutDashboard,
   FileText,
-  Send,
   Settings,
   Activity,
-  Kanban,
+  Building2,
 } from "lucide-react";
+import UserMenu from "./UserMenu";
 
 const navItems = [
-  { href: "/jobs", label: "Jobs", icon: Briefcase },
-  { href: "/pipeline", label: "Pipeline", icon: Kanban },
+  { href: "/jobs", label: "Job Pipeline", icon: Briefcase },
   { href: "/resume", label: "Resume", icon: FileText },
-  { href: "/auto-apply", label: "Auto-Apply", icon: Send },
   { href: "/crawl-log", label: "Crawl Log", icon: Activity },
+  { href: "/companies", label: "Discover", icon: Building2 },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -51,6 +50,7 @@ export default function Sidebar() {
           );
         })}
       </nav>
+      <UserMenu />
     </aside>
   );
 }

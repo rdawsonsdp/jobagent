@@ -14,6 +14,11 @@ import {
   ToggleLeft,
   ToggleRight,
   User,
+  Sparkles,
+  Check,
+  X,
+  Clock,
+  Calendar,
 } from "lucide-react";
 
 interface SearchProfile {
@@ -28,13 +33,39 @@ interface SearchProfile {
   min_relevance_score: number | null;
 }
 
+interface SearchSuggestion {
+  id: string;
+  suggestion_type: string;
+  field: string;
+  value: string;
+  reasoning: string | null;
+  status: string;
+  created_at: string;
+}
+
 interface JobSource {
   id: string;
   name: string;
-  type: string;
-  url: string | null;
-  enabled: boolean;
+  source_type: string;
+  base_url: string | null;
+  enabled: boolean | null;
 }
+
+interface AgentSchedule {
+  id?: string;
+  name: string;
+  enabled: boolean;
+  days_of_week: number[];
+  hour: number;
+  minute: number;
+  timezone: string;
+  budget_minutes: number;
+  dry_run: boolean;
+  last_run_at: string | null;
+  next_run_at: string | null;
+}
+
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 interface UserProfile {
   id?: string;
@@ -94,19 +125,142 @@ export default function SettingsPage() {
   const [userProfileId, setUserProfileId] = useState<string | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
 
+  // Suggestions state
+  const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
+  const [respondingSuggestion, setRespondingSuggestion] = useState<string | null>(null);
+
+  // Agent schedule state
+  const [schedule, setSchedule] = useState<AgentSchedule>({
+    name: "Job Search",
+    enabled: false,
+    days_of_week: [1, 2, 3, 4, 5],
+    hour: 8,
+    minute: 0,
+    timezone: "America/Chicago",
+    budget_minutes: 30,
+    dry_run: true,
+    last_run_at: null,
+    next_run_at: null,
+  });
+  const [scheduleId, setScheduleId] = useState<string | null>(null);
+  const [savingSchedule, setSavingSchedule] = useState(false);
+
   // Form state for comma-separated inputs
   const [formJobTitles, setFormJobTitles] = useState("");
   const [formKeywords, setFormKeywords] = useState("");
   const [formNegativeKeywords, setFormNegativeKeywords] = useState("");
   const [formLocations, setFormLocations] = useState("");
 
+  const fetchSchedule = useCallback(async () => {
+    try {
+      const res = await fetch("/api/schedule");
+      const data = await res.json();
+      if (data.schedules && data.schedules.length > 0) {
+        const s = data.schedules[0];
+        setScheduleId(s.id);
+        setSchedule({
+          name: s.name ?? "Job Search",
+          enabled: s.enabled ?? false,
+          days_of_week: s.days_of_week ?? [1, 2, 3, 4, 5],
+          hour: s.hour ?? 8,
+          minute: s.minute ?? 0,
+          timezone: s.timezone ?? "America/Chicago",
+          budget_minutes: s.budget_minutes ?? 30,
+          dry_run: s.dry_run ?? true,
+          last_run_at: s.last_run_at ?? null,
+          next_run_at: s.next_run_at ?? null,
+        });
+      }
+    } catch {
+      // Silently fail
+    }
+  }, []);
+
+  const saveSchedule = async () => {
+    setSavingSchedule(true);
+    try {
+      const res = await fetch("/api/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: scheduleId,
+          name: schedule.name,
+          enabled: schedule.enabled,
+          days_of_week: schedule.days_of_week,
+          hour: schedule.hour,
+          minute: schedule.minute,
+          timezone: schedule.timezone,
+          budget_minutes: schedule.budget_minutes,
+          dry_run: schedule.dry_run,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        toast.error(data.error);
+      } else {
+        if (data.schedule?.id) setScheduleId(data.schedule.id);
+        if (data.schedule?.next_run_at) {
+          setSchedule((prev) => ({ ...prev, next_run_at: data.schedule.next_run_at }));
+        }
+        toast.success("Schedule saved");
+      }
+    } catch {
+      toast.error("Failed to save schedule");
+    }
+    setSavingSchedule(false);
+  };
+
+  const toggleDay = (day: number) => {
+    setSchedule((prev) => ({
+      ...prev,
+      days_of_week: prev.days_of_week.includes(day)
+        ? prev.days_of_week.filter((d) => d !== day)
+        : [...prev.days_of_week, day].sort(),
+    }));
+  };
+
+  const fetchSuggestions = useCallback(async () => {
+    try {
+      const res = await fetch("/api/suggestions");
+      const data = await res.json();
+      if (data.suggestions) setSuggestions(data.suggestions);
+    } catch {
+      // Silently fail - suggestions are optional
+    }
+  }, []);
+
+  const respondToSuggestion = async (suggestionId: string, action: "accepted" | "dismissed") => {
+    setRespondingSuggestion(suggestionId);
+    try {
+      const res = await fetch("/api/suggestions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ suggestionId, action }),
+      });
+      if (res.ok) {
+        toast.success(action === "accepted" ? "Suggestion applied to your search profile" : "Suggestion dismissed");
+        setSuggestions((prev) => prev.filter((s) => s.id !== suggestionId));
+        if (action === "accepted") fetchData();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Failed to process suggestion");
+      }
+    } catch {
+      toast.error("Failed to process suggestion");
+    }
+    setRespondingSuggestion(null);
+  };
+
   const fetchData = useCallback(async () => {
     const supabase = createClient();
+
+    // Get current user for RLS-protected queries
+    const { data: { user } } = await supabase.auth.getUser();
 
     const [profilesRes, sourcesRes, userProfileRes] = await Promise.all([
       supabase.from("search_profiles").select("*").order("created_at", { ascending: false }),
       supabase.from("job_sources").select("*").order("name"),
-      supabase.from("user_profile").select("*").limit(1).maybeSingle(),
+      supabase.from("user_profile").select("*").eq("user_id", user?.id ?? "").limit(1).maybeSingle(),
     ]);
 
     if (profilesRes.error) {
@@ -150,13 +304,24 @@ export default function SettingsPage() {
 
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+    fetchSuggestions();
+    fetchSchedule();
+  }, [fetchData, fetchSuggestions, fetchSchedule]);
 
   const saveUserProfile = async () => {
     setSavingProfile(true);
     const supabase = createClient();
 
+    // Get current user ID for RLS
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.error("Not authenticated");
+      setSavingProfile(false);
+      return;
+    }
+
     const payload = {
+      user_id: user.id,
       first_name: userProfile.first_name || null,
       last_name: userProfile.last_name || null,
       email: userProfile.email || null,
@@ -244,6 +409,12 @@ export default function SettingsPage() {
 
     setSaving(true);
     const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.error("Not authenticated");
+      setSaving(false);
+      return;
+    }
 
     if (profile.id) {
       // Update
@@ -271,6 +442,7 @@ export default function SettingsPage() {
     } else {
       // Insert
       const { error } = await supabase.from("search_profiles").insert({
+        user_id: user.id,
         name: profile.name,
         job_titles: profile.job_titles,
         keywords: profile.keywords,
@@ -862,6 +1034,268 @@ export default function SettingsPage() {
           )}
         </section>
 
+        {/* Search Suggestions Section */}
+        {suggestions.length > 0 && (
+          <section className="mb-12">
+            <div className="flex items-center gap-2 mb-4">
+              <Sparkles className="w-5 h-5 text-amber-500" />
+              <h2 className="text-lg font-semibold text-gray-900">
+                Search Suggestions
+              </h2>
+              <span className="text-sm text-gray-400">
+                {suggestions.length} pending
+              </span>
+            </div>
+
+            <p className="text-sm text-gray-500 mb-3">
+              Based on your job interactions, here are suggestions to improve your search profiles.
+            </p>
+
+            <div className="space-y-3">
+              {suggestions.map((suggestion) => {
+                const typeLabels: Record<string, string> = {
+                  add_keyword: "Add Keyword",
+                  add_title: "Add Job Title",
+                  add_negative_keyword: "Add Negative Keyword",
+                  raise_min_score: "Raise Min Score",
+                };
+                const typeColors: Record<string, string> = {
+                  add_keyword: "bg-blue-50 text-blue-700",
+                  add_title: "bg-purple-50 text-purple-700",
+                  add_negative_keyword: "bg-red-50 text-red-700",
+                  raise_min_score: "bg-amber-50 text-amber-700",
+                };
+
+                return (
+                  <div
+                    key={suggestion.id}
+                    className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span
+                            className={`inline-block rounded-md px-2 py-0.5 text-xs font-medium ${
+                              typeColors[suggestion.suggestion_type] || "bg-gray-50 text-gray-700"
+                            }`}
+                          >
+                            {typeLabels[suggestion.suggestion_type] || suggestion.suggestion_type}
+                          </span>
+                          <span className="text-sm font-medium text-gray-900">
+                            {suggestion.value}
+                          </span>
+                        </div>
+                        {suggestion.reasoning && (
+                          <p className="text-sm text-gray-500 mt-1">
+                            {suggestion.reasoning}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => respondToSuggestion(suggestion.id, "accepted")}
+                          disabled={respondingSuggestion === suggestion.id}
+                          className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+                        >
+                          {respondingSuggestion === suggestion.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Check className="w-3.5 h-3.5" />
+                          )}
+                          Accept
+                        </button>
+                        <button
+                          onClick={() => respondToSuggestion(suggestion.id, "dismissed")}
+                          disabled={respondingSuggestion === suggestion.id}
+                          className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* Agent Schedule Section */}
+        <section className="mb-12">
+          <div className="flex items-center gap-2 mb-4">
+            <Calendar className="w-5 h-5 text-teal-600" />
+            <h2 className="text-lg font-semibold text-gray-900">Agent Schedule</h2>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+            <p className="text-sm text-gray-500 mb-5">
+              Schedule the job search agent to run automatically on specific days and times.
+            </p>
+
+            {/* Enable toggle */}
+            <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-100">
+              <div>
+                <span className="text-sm font-medium text-gray-900">Enable Schedule</span>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {schedule.enabled
+                    ? schedule.next_run_at
+                      ? `Next run: ${new Date(schedule.next_run_at).toLocaleString()}`
+                      : "Schedule is active"
+                    : "Schedule is paused"}
+                </p>
+              </div>
+              <button
+                onClick={() => setSchedule((prev) => ({ ...prev, enabled: !prev.enabled }))}
+                className="inline-flex items-center justify-center"
+              >
+                {schedule.enabled ? (
+                  <ToggleRight className="w-10 h-10 text-green-600" />
+                ) : (
+                  <ToggleLeft className="w-10 h-10 text-gray-300" />
+                )}
+              </button>
+            </div>
+
+            {/* Days of week */}
+            <div className="mb-5">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Days of Week
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {DAY_NAMES.map((name, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => toggleDay(idx)}
+                    className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                      schedule.days_of_week.includes(idx)
+                        ? "bg-teal-600 text-white"
+                        : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                    }`}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Time and settings grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <Clock className="w-3.5 h-3.5 inline mr-1" />
+                  Hour
+                </label>
+                <select
+                  value={schedule.hour}
+                  onChange={(e) => setSchedule((prev) => ({ ...prev, hour: Number(e.target.value) }))}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-100 bg-white"
+                >
+                  {Array.from({ length: 24 }, (_, i) => (
+                    <option key={i} value={i}>
+                      {i === 0 ? "12 AM" : i < 12 ? `${i} AM` : i === 12 ? "12 PM" : `${i - 12} PM`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Minute
+                </label>
+                <select
+                  value={schedule.minute}
+                  onChange={(e) => setSchedule((prev) => ({ ...prev, minute: Number(e.target.value) }))}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-100 bg-white"
+                >
+                  {[0, 15, 30, 45].map((m) => (
+                    <option key={m} value={m}>
+                      :{m.toString().padStart(2, "0")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Timezone
+                </label>
+                <select
+                  value={schedule.timezone}
+                  onChange={(e) => setSchedule((prev) => ({ ...prev, timezone: e.target.value }))}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-100 bg-white"
+                >
+                  <option value="America/New_York">Eastern</option>
+                  <option value="America/Chicago">Central</option>
+                  <option value="America/Denver">Mountain</option>
+                  <option value="America/Los_Angeles">Pacific</option>
+                  <option value="UTC">UTC</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Budget (minutes)
+                </label>
+                <input
+                  type="number"
+                  min={5}
+                  max={120}
+                  value={schedule.budget_minutes}
+                  onChange={(e) =>
+                    setSchedule((prev) => ({
+                      ...prev,
+                      budget_minutes: Math.max(5, Math.min(120, Number(e.target.value) || 30)),
+                    }))
+                  }
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-100"
+                />
+                <p className="text-xs text-gray-400 mt-1">How long the agent runs each session (5-120 min)</p>
+              </div>
+
+              <div className="flex items-center pt-6">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={schedule.dry_run}
+                    onChange={(e) =>
+                      setSchedule((prev) => ({ ...prev, dry_run: e.target.checked }))
+                    }
+                    className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                  />
+                  <span className="text-sm font-medium text-gray-700">Dry Run</span>
+                  <span className="text-xs text-gray-400">(search only, no applications)</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Last run info */}
+            {schedule.last_run_at && (
+              <div className="text-xs text-gray-400 mb-4">
+                Last run: {new Date(schedule.last_run_at).toLocaleString()}
+              </div>
+            )}
+
+            <div className="flex items-center pt-4 border-t border-gray-100">
+              <button
+                onClick={saveSchedule}
+                disabled={savingSchedule}
+                className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 transition-colors"
+              >
+                {savingSchedule ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                Save Schedule
+              </button>
+            </div>
+          </div>
+        </section>
+
         {/* Job Sources Section */}
         <section>
           <div className="flex items-center gap-2 mb-4">
@@ -903,11 +1337,11 @@ export default function SettingsPage() {
                       </td>
                       <td className="py-3 px-4 text-gray-600">
                         <span className="inline-block rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-                          {source.type}
+                          {source.source_type}
                         </span>
                       </td>
                       <td className="py-3 px-4 text-gray-500 text-xs truncate max-w-[300px]">
-                        {source.url ?? "-"}
+                        {source.base_url ?? "-"}
                       </td>
                       <td className="py-3 px-4 text-center">
                         <button
