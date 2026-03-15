@@ -35,20 +35,6 @@ Rules:
 - If the page appears to only show a cookie wall with no job content behind it, return []
 - If you need additional information about the candidate to properly match (e.g., security clearance, specific certifications, language skills), include a special entry with title "[NEED_INFO]" and match_reasoning describing what info is needed`;
 
-function stripHtml(html: string): string {
-  let cleaned = html
-    .replace(/<div[^>]*(?:cookie|consent|gdpr|privacy-notice|cc-banner|onetrust)[^>]*>[\s\S]*?<\/div>/gi, "")
-    .replace(/<section[^>]*(?:cookie|consent|gdpr)[^>]*>[\s\S]*?<\/section>/gi, "")
-    .replace(/<aside[^>]*(?:cookie|consent)[^>]*>[\s\S]*?<\/aside>/gi, "");
-
-  return cleaned
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function urlHash(url: string): string {
   return crypto.createHash("md5").update(url).digest("hex");
 }
@@ -256,137 +242,6 @@ async function tryATSSmart(
   return null;
 }
 
-// ----- Browser-based page fetching -----
-
-const COOKIE_CONSENT_SELECTORS = [
-  '#onetrust-accept-btn-handler',
-  '.onetrust-close-btn-handler',
-  '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
-  '#CybotCookiebotDialogBodyButtonAccept',
-  'button[id*="accept"]',
-  'button[id*="consent"]',
-  'button[class*="accept"]',
-  'button[class*="consent"]',
-  'a[id*="accept"]',
-  '[data-testid*="accept"]',
-  '[data-testid*="consent"]',
-];
-
-const COOKIE_CONSENT_TEXTS = [
-  "accept all", "accept cookies", "i accept", "i agree",
-  "got it", "allow all", "agree", "ok",
-];
-
-async function fetchWithBrowser(url: string): Promise<string> {
-  // Lazy-load puppeteer — not available on Vercel serverless
-  let puppeteer, chromium;
-  try {
-    puppeteer = (await import("puppeteer-core")).default;
-    chromium = (await import("chromium")).default;
-  } catch {
-    throw new Error("Browser not available in this environment");
-  }
-
-  const browser = await puppeteer.launch({
-    executablePath: chromium.path,
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--no-first-run",
-      "--no-zygote",
-    ],
-  });
-
-  try {
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1440, height: 900 });
-    await page.setUserAgent(
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    );
-
-    // Pre-set common cookie consent cookies
-    const domain = new URL(url).hostname;
-    await page.setCookie(
-      { name: "cookieconsent_status", value: "allow", domain },
-      { name: "CookieConsent", value: "true", domain },
-      { name: "cookie-agreed", value: "2", domain },
-      { name: "cookies_accepted", value: "true", domain },
-      { name: "gdpr_consent", value: "1", domain },
-      { name: "OptanonAlertBoxClosed", value: new Date().toISOString(), domain },
-      { name: "eupubconsent-v2", value: "true", domain },
-    );
-
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 25000 });
-
-    // Try CSS selectors first
-    for (const selector of COOKIE_CONSENT_SELECTORS) {
-      try {
-        const el = await page.$(selector);
-        if (el) {
-          await el.click();
-          await page.waitForNetworkIdle({ timeout: 3000 }).catch(() => {});
-          break;
-        }
-      } catch { /* try next */ }
-    }
-
-    // Try text-based button clicking
-    await page.evaluate((texts: string[]) => {
-      const buttons = document.querySelectorAll("button, a[role='button'], [class*='btn']");
-      for (const btn of buttons) {
-        const text = btn.textContent?.trim().toLowerCase() || "";
-        if (texts.some((t) => text === t || text.startsWith(t))) {
-          (btn as HTMLElement).click();
-          return;
-        }
-      }
-    }, COOKIE_CONSENT_TEXTS);
-
-    await new Promise((r) => setTimeout(r, 1500));
-    return await page.content();
-  } finally {
-    await browser.close();
-  }
-}
-
-// ----- Simple fetch with consent cookies -----
-
-async function fetchWithCookies(url: string): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Cache-Control": "no-cache",
-        Cookie:
-          "cookieconsent_status=allow; CookieConsent=true; cookie-agreed=2; cookies_accepted=true; gdpr_consent=1; OptanonAlertBoxClosed=2026-01-01T00:00:00.000Z; eupubconsent-v2=true",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1",
-        "Upgrade-Insecure-Requests": "1",
-      },
-      redirect: "follow",
-    });
-    clearTimeout(timeout);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.text();
-  } catch (err) {
-    clearTimeout(timeout);
-    throw err;
-  }
-}
 
 // ----- Workday JSON API -----
 
@@ -544,28 +399,6 @@ async function discoverWorkdayJobs(
   return null;
 }
 
-// ----- Alternative URL patterns -----
-
-function generateAlternativeUrls(companyName: string, originalUrl: string): string[] {
-  const urls: string[] = [];
-  try {
-    const u = new URL(originalUrl);
-    const domain = u.hostname.replace(/^www\./, "");
-    const baseDomain = domain.split(".").slice(-2).join(".");
-
-    // Common career page patterns
-    urls.push(`https://www.${baseDomain}/careers`);
-    urls.push(`https://www.${baseDomain}/jobs`);
-    urls.push(`https://careers.${baseDomain}`);
-    urls.push(`https://jobs.${baseDomain}`);
-    urls.push(`https://www.${baseDomain}/about/careers`);
-    urls.push(`https://www.${baseDomain}/company/careers`);
-  } catch { /* ignore */ }
-
-  // Filter out the original URL
-  return urls.filter((u) => u !== originalUrl);
-}
-
 // ----- Main crawl function -----
 
 async function crawlCompany(
@@ -631,96 +464,9 @@ async function crawlCompany(
     }
   }
 
-  // ===== STRATEGY 3: Headless browser on original URL =====
-  if (!pageText) {
-    try {
-      console.log(`[Crawl] ${companyName}: Trying headless browser on ${careersUrl}...`);
-      const html = await fetchWithBrowser(careersUrl);
-      const text = stripHtml(html).substring(0, 80000);
-      if (text.length > 100) {
-        pageText = text;
-      }
-    } catch (browserErr) {
-      console.log(`[Crawl] ${companyName}: Browser failed: ${browserErr instanceof Error ? browserErr.message : String(browserErr)}`);
-    }
-  }
-
-  // ===== STRATEGY 4: Simple fetch on original URL =====
-  if (!pageText) {
-    try {
-      console.log(`[Crawl] ${companyName}: Trying simple fetch on ${careersUrl}...`);
-      const html = await fetchWithCookies(careersUrl);
-      const text = stripHtml(html).substring(0, 80000);
-      if (text.length > 100) {
-        pageText = text;
-      }
-    } catch (fetchErr) {
-      console.log(`[Crawl] ${companyName}: Simple fetch failed: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`);
-    }
-  }
-
-  // ===== STRATEGY 5: Try alternative URL patterns =====
-  if (!pageText) {
-    const altUrls = generateAlternativeUrls(companyName, careersUrl);
-    for (const altUrl of altUrls) {
-      try {
-        console.log(`[Crawl] ${companyName}: Trying alternative URL ${altUrl}...`);
-        const html = await fetchWithCookies(altUrl);
-        const text = stripHtml(html).substring(0, 80000);
-        if (text.length > 200) {
-          pageText = text;
-          // Update the careers URL since we found a working one
-          await supabase
-            .from("target_companies")
-            .update({ careers_url: altUrl })
-            .eq("id", companyId);
-          break;
-        }
-      } catch {
-        // try next URL
-      }
-    }
-  }
-
-  // ===== STRATEGY 6: Last resort — ask Claude to find careers page =====
-  if (!pageText) {
-    console.log(`[Crawl] ${companyName}: All strategies failed. Asking Claude for help...`);
-    try {
-      const searchResponse = await anthropic.messages.create({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1024,
-        messages: [{
-          role: "user",
-          content: `I need to find the careers/jobs page for "${companyName}". The URL ${careersUrl} is not working. Their ATS type might be "${atsType || "unknown"}". What is the most likely correct URL for their careers page? Return ONLY the URL, nothing else.`,
-        }],
-      });
-      const suggestedUrl = searchResponse.content?.[0]?.type === "text"
-        ? searchResponse.content[0].text.trim()
-        : "";
-
-      if (suggestedUrl && suggestedUrl.startsWith("http")) {
-        try {
-          const html = await fetchWithBrowser(suggestedUrl);
-          const text = stripHtml(html).substring(0, 80000);
-          if (text.length > 200) {
-            pageText = text;
-            await supabase
-              .from("target_companies")
-              .update({ careers_url: suggestedUrl })
-              .eq("id", companyId);
-          }
-        } catch {
-          // Last resort also failed
-        }
-      }
-    } catch {
-      // Claude call failed
-    }
-  }
-
   if (!pageText || pageText.length < 50) {
     throw new Error(
-      "Could not access careers page — tried ATS APIs, headless browser, alternative URLs, and AI lookup"
+      "Could not find jobs — tried ATS APIs (Greenhouse, Lever, Ashby) and Workday JSON API"
     );
   }
 
