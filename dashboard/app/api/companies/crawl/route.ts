@@ -4,8 +4,6 @@ import { getAuthUserId } from "@/lib/auth";
 import { loadUserContext } from "@/lib/user-context";
 import Anthropic from "@anthropic-ai/sdk";
 import crypto from "crypto";
-import puppeteer from "puppeteer-core";
-import chromium from "chromium";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -280,6 +278,15 @@ const COOKIE_CONSENT_TEXTS = [
 ];
 
 async function fetchWithBrowser(url: string): Promise<string> {
+  // Lazy-load puppeteer — not available on Vercel serverless
+  let puppeteer, chromium;
+  try {
+    puppeteer = (await import("puppeteer-core")).default;
+    chromium = (await import("chromium")).default;
+  } catch {
+    throw new Error("Browser not available in this environment");
+  }
+
   const browser = await puppeteer.launch({
     executablePath: chromium.path,
     headless: true,
