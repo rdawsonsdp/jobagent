@@ -151,9 +151,28 @@ async function handleApply(
 
     child.on("close", async (code) => {
       runningProcesses.delete(processId);
-      if (code !== 0) {
+      const supa = await createServiceRoleClient();
+      if (code === 0) {
+        // Record positive feedback signal for successful auto-apply
+        const jobId = item.job_id as string;
+        if (jobId) {
+          const { data: job } = await supa
+            .from("jobs")
+            .select("title, company, keywords, relevance_score, location, is_remote")
+            .eq("id", jobId)
+            .single();
+          await supa.from("job_feedback").upsert(
+            {
+              user_id: userId,
+              job_id: jobId,
+              signal_type: "applied",
+              metadata: job || {},
+            },
+            { onConflict: "user_id,job_id,signal_type" }
+          );
+        }
+      } else {
         console.error(`Apply script exited with code ${code}. stderr: ${stderr}`);
-        const supa = await createServiceRoleClient();
         await supa
           .from("auto_apply_queue")
           .update({

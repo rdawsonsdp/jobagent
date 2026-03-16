@@ -10,6 +10,18 @@ type Application = Tables<"applications"> & {
 
 type Status = "saved" | "applied" | "interviewing" | "offer" | "rejected" | "withdrawn";
 
+async function sendFeedback(jobId: string, signalType: string) {
+  try {
+    await fetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId, signalType }),
+    });
+  } catch {
+    // best-effort
+  }
+}
+
 export function useApplications() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,6 +53,7 @@ export function useApplications() {
 
     if (!error && data) {
       setApplications((prev) => [data as Application, ...prev]);
+      sendFeedback(jobId, "saved");
     }
     return { data, error };
   }, []);
@@ -66,6 +79,10 @@ export function useApplications() {
       setApplications((prev) =>
         prev.map((a) => (a.id === applicationId ? { ...a, status } : a))
       );
+      // Record feedback signal for applied status
+      if (status === "applied" && app?.job_id) {
+        sendFeedback(app.job_id, "applied");
+      }
     }
     return { error };
   }, [applications]);
@@ -88,6 +105,7 @@ export function useApplications() {
   }, [applications]);
 
   const dismissJob = useCallback(async (applicationId: string) => {
+    const app = applications.find((a) => a.id === applicationId);
     const { error } = await supabase
       .from("applications")
       .update({ is_dismissed: true })
@@ -95,8 +113,11 @@ export function useApplications() {
 
     if (!error) {
       setApplications((prev) => prev.filter((a) => a.id !== applicationId));
+      if (app?.job_id) {
+        sendFeedback(app.job_id, "dismissed");
+      }
     }
-  }, []);
+  }, [applications]);
 
   const grouped = {
     saved: applications.filter((a) => a.status === "saved" && !a.is_dismissed),

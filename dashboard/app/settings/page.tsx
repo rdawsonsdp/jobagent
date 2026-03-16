@@ -19,6 +19,8 @@ import {
   X,
   Clock,
   Calendar,
+  Brain,
+  RefreshCw,
 } from "lucide-react";
 
 interface SearchProfile {
@@ -145,11 +147,54 @@ export default function SettingsPage() {
   const [scheduleId, setScheduleId] = useState<string | null>(null);
   const [savingSchedule, setSavingSchedule] = useState(false);
 
+  // Learned preferences state
+  const [learnedPrefs, setLearnedPrefs] = useState<{
+    learned_summary: string | null;
+    preferred_titles: string[];
+    avoided_titles: string[];
+    preferred_keywords: string[];
+    avoided_keywords: string[];
+    total_applied: number;
+    total_dismissed: number;
+    last_computed_at: string | null;
+    feedback_count_at_last_compute: number;
+  } | null>(null);
+  const [recomputing, setRecomputing] = useState(false);
+
   // Form state for comma-separated inputs
   const [formJobTitles, setFormJobTitles] = useState("");
   const [formKeywords, setFormKeywords] = useState("");
   const [formNegativeKeywords, setFormNegativeKeywords] = useState("");
   const [formLocations, setFormLocations] = useState("");
+
+  const fetchLearnedPrefs = useCallback(async () => {
+    try {
+      const res = await fetch("/api/feedback/recompute");
+      const data = await res.json();
+      if (data.preferences) setLearnedPrefs(data.preferences);
+    } catch {
+      // silently fail
+    }
+  }, []);
+
+  const recomputePrefs = async () => {
+    setRecomputing(true);
+    try {
+      const res = await fetch("/api/feedback/recompute", { method: "POST" });
+      const data = await res.json();
+      if (data.recomputed) {
+        toast.success("Preferences recomputed from your feedback!");
+        fetchLearnedPrefs();
+      } else if (data.error) {
+        toast.error(data.error);
+      } else {
+        toast.info("Not enough new feedback to recompute yet");
+      }
+    } catch {
+      toast.error("Failed to recompute preferences");
+    }
+    setRecomputing(false);
+  };
 
   const fetchSchedule = useCallback(async () => {
     try {
@@ -306,7 +351,8 @@ export default function SettingsPage() {
     fetchData();
     fetchSuggestions();
     fetchSchedule();
-  }, [fetchData, fetchSuggestions, fetchSchedule]);
+    fetchLearnedPrefs();
+  }, [fetchData, fetchSuggestions, fetchSchedule, fetchLearnedPrefs]);
 
   const saveUserProfile = async () => {
     setSavingProfile(true);
@@ -1360,6 +1406,100 @@ export default function SettingsPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </section>
+
+        {/* ───── Learned Preferences ───── */}
+        <section className="bg-white rounded-xl shadow-sm border p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Brain className="w-5 h-5 text-purple-600" />
+              <h2 className="text-lg font-semibold">Learned Preferences</h2>
+            </div>
+            <button
+              onClick={recomputePrefs}
+              disabled={recomputing}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 disabled:opacity-50"
+            >
+              {recomputing ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4" />
+              )}
+              Recompute Now
+            </button>
+          </div>
+
+          <p className="text-sm text-gray-500 mb-4">
+            The AI learns from your actions — jobs you apply to, save, dismiss, or delete — and adjusts future matching scores accordingly.
+          </p>
+
+          {learnedPrefs?.learned_summary ? (
+            <div className="space-y-4">
+              <div className="bg-purple-50 rounded-lg p-4">
+                <p className="text-sm text-gray-800 leading-relaxed">
+                  {learnedPrefs.learned_summary}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <span className="font-medium text-gray-700">Signals analyzed:</span>{" "}
+                  <span className="text-gray-600">
+                    {learnedPrefs.total_applied} positive, {learnedPrefs.total_dismissed} negative
+                    ({learnedPrefs.feedback_count_at_last_compute} total)
+                  </span>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-700">Last computed:</span>{" "}
+                  <span className="text-gray-600">
+                    {learnedPrefs.last_computed_at
+                      ? new Date(learnedPrefs.last_computed_at).toLocaleString()
+                      : "Never"}
+                  </span>
+                </div>
+              </div>
+
+              {learnedPrefs.preferred_titles.length > 0 && (
+                <div>
+                  <span className="text-xs font-medium text-green-700">Preferred titles: </span>
+                  <span className="text-xs text-gray-600">
+                    {learnedPrefs.preferred_titles.join(", ")}
+                  </span>
+                </div>
+              )}
+              {learnedPrefs.avoided_titles.length > 0 && (
+                <div>
+                  <span className="text-xs font-medium text-red-700">Avoided titles: </span>
+                  <span className="text-xs text-gray-600">
+                    {learnedPrefs.avoided_titles.join(", ")}
+                  </span>
+                </div>
+              )}
+              {learnedPrefs.preferred_keywords.length > 0 && (
+                <div>
+                  <span className="text-xs font-medium text-green-700">Preferred keywords: </span>
+                  <span className="text-xs text-gray-600">
+                    {learnedPrefs.preferred_keywords.join(", ")}
+                  </span>
+                </div>
+              )}
+              {learnedPrefs.avoided_keywords.length > 0 && (
+                <div>
+                  <span className="text-xs font-medium text-red-700">Avoided keywords: </span>
+                  <span className="text-xs text-gray-600">
+                    {learnedPrefs.avoided_keywords.join(", ")}
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-6 text-gray-400">
+              <Brain className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">
+                No learned preferences yet. Apply to, save, or dismiss some jobs to start building your preference profile.
+              </p>
             </div>
           )}
         </section>
