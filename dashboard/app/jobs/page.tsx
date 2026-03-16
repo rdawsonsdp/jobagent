@@ -221,6 +221,7 @@ export default function JobsPage() {
         const data = await res.json();
         if (res.ok) {
           toast.success(data.message);
+          sendFeedback(jobId, "queued");
           fetchQueue();
         } else {
           toast.error(data.error || "Failed to queue job");

@@ -8,7 +8,7 @@ export async function loadUserContext(
   supabase: SupabaseClient,
   userId: string
 ): Promise<string> {
-  const [resumeRes, profileRes, prefsRes] = await Promise.all([
+  const [resumeRes, profileRes, prefsRes, learnedRes] = await Promise.all([
     supabase
       .from("resumes")
       .select("raw_text, parsed_data, skills, target_titles")
@@ -28,6 +28,11 @@ export async function loadUserContext(
       .select("city, state, country")
       .eq("user_id", userId)
       .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("user_preferences")
+      .select("learned_summary, total_applied, total_dismissed")
+      .eq("user_id", userId)
       .maybeSingle(),
   ]);
 
@@ -57,6 +62,13 @@ export async function loadUserContext(
   if (prefsRes.data) {
     const u = prefsRes.data;
     contextParts.push(`Location: ${[u.city, u.state, u.country].filter(Boolean).join(", ")}`);
+  }
+
+  if (learnedRes.data?.learned_summary) {
+    const l = learnedRes.data;
+    contextParts.push(
+      `\nLEARNED PREFERENCES (from analyzing ${l.total_applied || 0} applied + ${l.total_dismissed || 0} dismissed jobs):\n${l.learned_summary}`
+    );
   }
 
   if (contextParts.length === 0) return "";

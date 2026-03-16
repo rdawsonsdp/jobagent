@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { getAuthUserId } from "@/lib/auth";
+import { recomputePreferences } from "@/lib/preference-learner";
 
 /**
  * POST /api/feedback
@@ -22,7 +23,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const validSignals = ["applied", "deleted", "saved", "dismissed"];
+    const validSignals = ["applied", "deleted", "saved", "dismissed", "queued"];
     if (!validSignals.includes(signalType)) {
       return NextResponse.json(
         { error: `signalType must be one of: ${validSignals.join(", ")}` },
@@ -61,6 +62,11 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) throw error;
+
+    // Lazy recomputation — only runs if enough new feedback accumulated
+    recomputePreferences(supabase, auth.userId).catch((err) =>
+      console.error("[Feedback] Recompute failed:", err)
+    );
 
     return NextResponse.json({ feedback: data });
   } catch (err) {

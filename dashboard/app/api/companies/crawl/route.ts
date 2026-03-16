@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { getAuthUserId } from "@/lib/auth";
 import { loadUserContext } from "@/lib/user-context";
+import { recomputePreferences } from "@/lib/preference-learner";
 import Anthropic from "@anthropic-ai/sdk";
 import crypto from "crypto";
 
@@ -33,7 +34,12 @@ Rules:
 - Score based on skills overlap, title relevance, location fit, and seniority match
 - Ignore cookie consent banners, privacy notices, and other overlay content — focus on the actual job listings
 - If the page appears to only show a cookie wall with no job content behind it, return []
-- If you need additional information about the candidate to properly match (e.g., security clearance, specific certifications, language skills), include a special entry with title "[NEED_INFO]" and match_reasoning describing what info is needed`;
+- If you need additional information about the candidate to properly match (e.g., security clearance, specific certifications, language skills), include a special entry with title "[NEED_INFO]" and match_reasoning describing what info is needed
+- If the user context includes LEARNED PREFERENCES, use them to adjust your scoring:
+  - Boost match_confidence for jobs matching preferred titles, keywords, and patterns
+  - Reduce match_confidence for jobs matching avoided titles, keywords, and patterns
+  - Learned preferences reflect what the user ACTUALLY wants, which may differ from their resume
+  - Learned preferences should override resume-based assumptions when they conflict`;
 
 function urlHash(url: string): string {
   return crypto.createHash("md5").update(url).digest("hex");
@@ -583,6 +589,12 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = await createServiceRoleClient();
+
+    // Recompute learned preferences before crawling (lazy — only if needed)
+    await recomputePreferences(supabase, auth.userId).catch((err) =>
+      console.error("[Crawl] Preference recompute failed:", err)
+    );
+
     let userContext = await loadUserContext(supabase, auth.userId);
     if (extraContext) {
       userContext += `\n\nADDITIONAL CONTEXT FROM CANDIDATE:\n${extraContext}`;
