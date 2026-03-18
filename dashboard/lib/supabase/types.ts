@@ -217,6 +217,238 @@ export type Database = {
           },
         ]
       }
+      bakery_config: {
+        Row: {
+          id: string
+          key: string
+          value: Json
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          key: string
+          value: Json
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          key?: string
+          value?: Json
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      bakery_email_actions: {
+        Row: {
+          id: string
+          email_id: string | null
+          action: string
+          category: string | null
+          confidence: number | null
+          draft_response: string | null
+          final_response: string | null
+          similar_examples: string[] | null
+          status: string
+          reviewed_by: string | null
+          reviewed_at: string | null
+          sent_at: string | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          email_id?: string | null
+          action: string
+          category?: string | null
+          confidence?: number | null
+          draft_response?: string | null
+          final_response?: string | null
+          similar_examples?: string[] | null
+          status?: string
+          reviewed_by?: string | null
+          reviewed_at?: string | null
+          sent_at?: string | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          email_id?: string | null
+          action?: string
+          category?: string | null
+          confidence?: number | null
+          draft_response?: string | null
+          final_response?: string | null
+          similar_examples?: string[] | null
+          status?: string
+          reviewed_by?: string | null
+          reviewed_at?: string | null
+          sent_at?: string | null
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bakery_email_actions_email_id_fkey"
+            columns: ["email_id"]
+            isOneToOne: false
+            referencedRelation: "bakery_emails"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bakery_email_actions_category_fkey"
+            columns: ["category"]
+            isOneToOne: false
+            referencedRelation: "bakery_email_categories"
+            referencedColumns: ["name"]
+          },
+        ]
+      }
+      bakery_email_categories: {
+        Row: {
+          id: string
+          name: string
+          display_name: string
+          description: string | null
+          auto_reply_enabled: boolean
+          confidence_threshold: number
+          example_count: number
+          template_response: string | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          name: string
+          display_name: string
+          description?: string | null
+          auto_reply_enabled?: boolean
+          confidence_threshold?: number
+          example_count?: number
+          template_response?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          name?: string
+          display_name?: string
+          description?: string | null
+          auto_reply_enabled?: boolean
+          confidence_threshold?: number
+          example_count?: number
+          template_response?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      bakery_email_pairs: {
+        Row: {
+          id: string
+          thread_id: string
+          customer_email_id: string | null
+          response_email_id: string | null
+          category: string | null
+          subcategory: string | null
+          quality_score: number
+          embedding: string | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          thread_id: string
+          customer_email_id?: string | null
+          response_email_id?: string | null
+          category?: string | null
+          subcategory?: string | null
+          quality_score?: number
+          embedding?: string | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          thread_id?: string
+          customer_email_id?: string | null
+          response_email_id?: string | null
+          category?: string | null
+          subcategory?: string | null
+          quality_score?: number
+          embedding?: string | null
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bakery_email_pairs_customer_email_id_fkey"
+            columns: ["customer_email_id"]
+            isOneToOne: false
+            referencedRelation: "bakery_emails"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bakery_email_pairs_response_email_id_fkey"
+            columns: ["response_email_id"]
+            isOneToOne: false
+            referencedRelation: "bakery_emails"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bakery_email_pairs_category_fkey"
+            columns: ["category"]
+            isOneToOne: false
+            referencedRelation: "bakery_email_categories"
+            referencedColumns: ["name"]
+          },
+        ]
+      }
+      bakery_emails: {
+        Row: {
+          id: string
+          message_id: string
+          thread_id: string
+          from_address: string
+          to_address: string
+          subject: string | null
+          body_text: string | null
+          body_html: string | null
+          direction: string
+          received_at: string
+          labels: string[]
+          has_attachments: boolean
+          is_processed: boolean
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          message_id: string
+          thread_id: string
+          from_address: string
+          to_address: string
+          subject?: string | null
+          body_text?: string | null
+          body_html?: string | null
+          direction: string
+          received_at: string
+          labels?: string[]
+          has_attachments?: boolean
+          is_processed?: boolean
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          message_id?: string
+          thread_id?: string
+          from_address?: string
+          to_address?: string
+          subject?: string | null
+          body_text?: string | null
+          body_html?: string | null
+          direction?: string
+          received_at?: string
+          labels?: string[]
+          has_attachments?: boolean
+          is_processed?: boolean
+          created_at?: string | null
+        }
+        Relationships: []
+      }
       auto_apply_logs: {
         Row: {
           action: string | null
@@ -974,6 +1206,23 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      match_email_pairs: {
+        Args: {
+          query_embedding: string
+          match_threshold?: number
+          match_count?: number
+          filter_category?: string
+        }
+        Returns: {
+          id: string
+          thread_id: string
+          customer_email_id: string
+          response_email_id: string
+          category: string
+          quality_score: number
+          similarity: number
+        }[]
+      }
       requesting_user_id: { Args: never; Returns: string }
     }
     Enums: {
