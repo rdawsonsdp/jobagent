@@ -1,0 +1,26 @@
+[project]
+name = "bakery-email-agent"
+version = "0.1.0"
+description = "AI-powered email agent for bakery customer support"
+requires-python = ">=3.9"
+dependencies = [
+    "anthropic>=0.39",
+    "supabase>=2.0",
+    "python-dotenv>=1.0",
+    "google-auth>=2.0",
+    "google-auth-oauthlib>=1.0",
+    "google-api-python-client>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+bakery-agent = "email_agent.agent_loop:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"

@@ -9,11 +9,13 @@ import {
   Settings,
   Activity,
   Building2,
+  Mail,
 } from "lucide-react";
 import UserMenu from "./UserMenu";
 
 const navItems = [
   { href: "/jobs", label: "Job Pipeline", icon: Briefcase },
+  { href: "/email-agent", label: "Email Agent", icon: Mail },
   { href: "/resume", label: "Resume", icon: FileText },
   { href: "/crawl-log", label: "Crawl Log", icon: Activity },
   { href: "/companies", label: "Discover", icon: Building2 },

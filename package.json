@@ -5,6 +5,9 @@
     "dev": "cd dashboard && npm run dev",
     "build": "cd dashboard && npm install && npm run build",
     "crawl": "cd crawler && python crawl_orchestrator.py",
-    "crawl:test": "cd crawler && python crawl_orchestrator.py --budget 10"
+    "crawl:test": "cd crawler && python crawl_orchestrator.py --budget 10",
+    "email-agent": "cd email_agent && python -m email_agent.agent_loop",
+    "email-import": "cd email_agent && python -m email_agent.import_emails",
+    "email-import:month": "cd email_agent && python -m email_agent.import_emails --days 30"
   }
 }
